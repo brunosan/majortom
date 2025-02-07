@@ -3,6 +3,7 @@ import shapely.geometry
 from shapely.geometry import Polygon
 from geolib import geohash
 from shapely.geometry.geo import box
+from shapely.geometry import Point
 
 
 class GridCell:
@@ -101,18 +102,38 @@ class MajorTomGrid:
             raise ValueError("Cell ID must be exactly 11 characters")
 
         bounds = geohash.bounds(cell_id)
-        buffer_size = 0.0001 * self.D if buffer else 0
-        p = box(bounds['w'], bounds['s'], bounds['e'], bounds['n'])
+        target = Point((bounds.ne.lon + bounds.sw.lon)/2, 
+                      (bounds.ne.lat + bounds.sw.lat)/2)
+        
+        # Create search box
+        buffer_size = 0.001 if buffer else 1e-6
+        p = box(
+            target.x - buffer_size,
+            target.y - buffer_size,
+            target.x + buffer_size,
+            target.y + buffer_size
+        )
 
-        if buffer:
-            p = p.buffer(buffer_size)
+        closest_cell = None
+        min_distance = float('inf')
 
-        candidates = list(self.generate_grid_cells(p))
-        for candidate in candidates:
-            if candidate.id() == cell_id:
+        for candidate in self.generate_grid_cells(p):
+            centroid = candidate.geom.centroid
+            distance = ((centroid.x - target.x) ** 2 + 
+                       (centroid.y - target.y) ** 2) ** 0.5
+            
+            # If exact match found, return immediately
+            if distance < 1e-10:
                 return candidate
+            
+            if distance < min_distance:
+                min_distance = distance
+                closest_cell = candidate
+
+        if closest_cell is not None:
+            return closest_cell
 
         if not buffer:
             return self.cell_from_id(cell_id, True)
 
-        raise ValueError(f"No cell found with ID {cell_id}")
+        raise ValueError(f"No cell found near point ({target.x}, {target.y})")
